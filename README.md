@@ -135,6 +135,10 @@ fenghua_sender_core/
     └── swresample-5.dll
 ```
 
+## 维护说明
+
+如需长期维护，请 fork 本仓库后在自己的分支上继续。
+
 ## License
 
 MIT
