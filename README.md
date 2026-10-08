@@ -1,6 +1,6 @@
 # Fenghua Sender (Windows)
 
-配套 [Fenghua Core](../fenghua_core) 的 PC 端发送程序。控制台程序，无界面。
+配套 [Fenghua Core](https://github.com/lanqiuxk-afk/fenghua_core) 的 PC 端发送程序。控制台程序，无界面。
 
 两个功能，命令行开关控制：
 
@@ -102,18 +102,16 @@ flags & 0x01 == 0  ->  裸 Annex-B 字节流
 本程序：TCP 连接 → 解析流头初始化解码器 → 逐帧 `avcodec_send_packet` →
 `avcodec_receive_frame` → 转 RGB32 → 统计 / 存 PPM / 转 MPEG-TS。
 
-### 两个实际踩到的坑（已在代码里绕过）
+### 解码实现要点
 
-1. **不要用 `av_parser_parse2`。**
-   附带/常见的精简 FFmpeg 构建（例如 scrcpy 用的那份，configure 里是
-   `--disable-everything ... --enable-parser=png`）**没有编译 h264 parser**，
-   `av_parser_init(AV_CODEC_ID_H264)` 会返回 NULL，走 parser 的路径会一帧都解不出来，
-   而且失败是静默的（函数第一行就 return）。framed 流里每个包本身就是完整访问单元，
+1. **不用 `av_parser_parse2`。**
+   常见的精简 FFmpeg 构建（例如 scrcpy 用的那份，configure 里是
+   `--disable-everything ... --enable-parser=png`）没有编译 h264 parser，
+   `av_parser_init(AV_CODEC_ID_H264)` 返回 NULL。framed 流里每个包本身就是完整访问单元，
    直接 `avcodec_send_packet` 即可，不需要 parser。
 
-2. **帧输出不要指望窗口。**
-   本仓库是控制台程序，没有 D3D/窗口渲染。要看画面请用 `--obs`（OBS 媒体源）或
-   `--dump`（PPM 序列），两者都不需要额外依赖。
+2. **帧输出走 OBS 或 PPM。**
+   本仓库是控制台程序，没有 D3D/窗口渲染。看画面用 `--obs` 或 `--dump`，都不需要额外依赖。
 
 ### OBS 输出
 
@@ -123,26 +121,19 @@ OBS 里添加「媒体源」→ 取消勾选「本地文件」→ 输入 `udp://
 ## 目录结构
 
 ```
-fenghua_sender/
+fenghua_sender_core/
 ├── CMakeLists.txt
 ├── build.bat
 ├── include/protocol.h           与 Android 端共用的协议定义
 ├── src/
 │   ├── main.cpp                 参数解析 + 停靠窗口/Raw Input + 状态显示
-│   ├── input_hook.{h,cpp}       低级钩子封装 (备用; 主流程用 main.cpp 里的实现)
+│   ├── input_hook.{h,cpp}       低级钩子封装 (可选, 主流程用 main.cpp 里的实现)
 │   └── video_player.{h,cpp}     投屏: FHSC 解析 + FFmpeg 解码 + OBS/PPM 输出
-└── third_party/
+└── third_party/                 FFmpeg 运行时 (LGPL), exe 同目录需放一份
     ├── avcodec-61.dll
     ├── avutil-59.dll
     └── swresample-5.dll
 ```
-
-## 已知限制
-
-- 键鼠捕获期间 PC 端光标被锁定，无法操作其它窗口（这是设计如此）。
-- `--dump` 每帧写一个文件，长时间开会产生大量小文件，只适合取样本。
-- 投屏解码是软解；4K/高码率下 CPU 占用会明显，建议设备端用较低分辨率推流。
-- 只支持 H.264。
 
 ## License
 
