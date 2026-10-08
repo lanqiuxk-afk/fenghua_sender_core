@@ -1,0 +1,17 @@
+# 换行统一: 仓库内一律 LF, 检出时不自动转换
+* text=auto eol=lf
+
+# Windows 批处理必须 CRLF
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.ps1 text eol=crlf
+
+# 二进制: 不做换行处理 (FFmpeg 的 DLL 会原样保存)
+*.dll binary
+*.lib binary
+*.pdb binary
+*.exe binary
+
+# 语言统计
+*.h    linguist-language=C++
+*.cpp  linguist-language=C++
