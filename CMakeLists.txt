@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.16)
+﻿cmake_minimum_required(VERSION 3.16)
 project(fenghua_sender LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
@@ -8,9 +8,7 @@ if(NOT CMAKE_BUILD_TYPE)
 endif()
 
 # ---------------------------------------------------------------------------
-#  FFmpeg 开发包 (投屏解码用)。只需要头文件 + 两个导入库, 运行时用 DLL。
-#  这里指向本机现成的 SDK; 换机器时改这一行或用 -DFFMPEG_DIR=... 覆盖。
-# ---------------------------------------------------------------------------
+#  FFmpeg 寮€鍙戝寘 (鎶曞睆瑙ｇ爜鐢?銆傚彧闇€瑕佸ご鏂囦欢 + 涓や釜瀵煎叆搴? 杩愯鏃剁敤 DLL銆?#  杩欓噷鎸囧悜鏈満鐜版垚鐨?SDK; 鎹㈡満鍣ㄦ椂鏀硅繖涓€琛屾垨鐢?-DFFMPEG_DIR=... 瑕嗙洊銆?# ---------------------------------------------------------------------------
 if(NOT DEFINED FFMPEG_DIR)
     set(FFMPEG_DIR "D:/fenghua_build/ffmpeg_dev")
 endif()
@@ -20,9 +18,9 @@ if(EXISTS "${FFMPEG_DIR}/include/libavcodec/avcodec.h"
    AND EXISTS "${FFMPEG_DIR}/lib/avcodec-61.lib"
    AND EXISTS "${FFMPEG_DIR}/lib/avutil-59.lib")
     set(FFMPEG_OK TRUE)
-    message(STATUS "FFmpeg SDK found at ${FFMPEG_DIR} -> 投屏功能启用")
+    message(STATUS "FFmpeg SDK found at ${FFMPEG_DIR} -> 鎶曞睆鍔熻兘鍚敤")
 else()
-    message(WARNING "FFmpeg SDK not found at ${FFMPEG_DIR} -> 只编译键鼠功能 (投屏不可用)")
+    message(WARNING "FFmpeg SDK not found at ${FFMPEG_DIR} -> 鍙紪璇戦敭榧犲姛鑳?(鎶曞睆涓嶅彲鐢?")
 endif()
 
 set(SENDER_SOURCES

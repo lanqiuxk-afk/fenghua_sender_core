@@ -33,6 +33,8 @@
 #define FH_PKT_PONG   0x31
 
 #define FH_DEFAULT_PORT 56789
+// 投屏流端口 (设备端 TCP 监听; 由 scrcpy-server 采集 + FHSC 转发)
+#define FH_STREAM_PORT  56790
 
 // 鼠标按键编号
 #define FH_BTN_LEFT   0

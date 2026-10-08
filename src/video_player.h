@@ -11,6 +11,9 @@
 //   - 可选: 转发为 MPEG-TS/UDP 给 OBS (VideoPlayerSetObs)
 //
 // 运行时依赖 third_party/ 下的 avcodec-61.dll / avutil-59.dll / swresample-5.dll
+// 投屏端口 (默认 56790), 必须在 VideoPlayerStart 之前调用
+void VideoPlayerSetPort(unsigned short port);
+
 bool VideoPlayerStart(const char* ip);
 void VideoPlayerStop();
 bool VideoPlayerRunning();

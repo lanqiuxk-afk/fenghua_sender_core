@@ -231,7 +231,8 @@ BOOL WINAPI ConsoleHandler(DWORD type) {
 void PrintUsage(const char* exe) {
     printf(
         "usage: %s [device-ip] [options]\n"
-        "  --stream          开启投屏接收 (56790), 打印解码统计\n"
+        "  --stream          开启投屏接收 (默认 56790), 打印解码统计\n"
+        "  --port <n>        投屏端口 (默认 56790)\n"
         "  --obs [port]      把 H.264 转发成 MPEG-TS/UDP 给 OBS (默认 9998)\n"
         "                    OBS 媒体源填 udp://127.0.0.1:9998\n"
         "  --dump <dir>      把解码帧写成 PPM 序列到目录\n"
@@ -249,11 +250,16 @@ int main(int argc, char** argv) {
     std::string dumpDir;
     bool wantStream = false, wantObs = false;
     unsigned short obsPort = 9998;
+    unsigned short streamPort = FH_STREAM_PORT;
 
     for (int i = 1; i < argc; i++) {
         std::string a = argv[i];
         if (a == "--help" || a == "-h") { PrintUsage(argv[0]); return 0; }
         else if (a == "--stream") wantStream = true;
+        else if (a == "--port") {
+            if (i + 1 >= argc) { printf("[!] --port needs a value\n"); return 2; }
+            streamPort = (unsigned short)atoi(argv[++i]);
+        }
         else if (a == "--obs") {
             wantObs = true;
             if (i + 1 < argc && argv[i + 1][0] != '-') obsPort = (unsigned short)atoi(argv[++i]);
@@ -313,6 +319,7 @@ int main(int argc, char** argv) {
     SetWindowsHookEx(WH_KEYBOARD_LL, KBProc, GetModuleHandle(nullptr), 0);
 
     if (wantStream) {
+        VideoPlayerSetPort(streamPort);
         if (!VideoPlayerStart(ip.c_str())) {
             printf("[!] stream start failed\n");
         } else {

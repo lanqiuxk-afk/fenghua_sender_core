@@ -47,7 +47,8 @@ fenghua_sender 192.168.1.23 --stream --dump out  键鼠 + 投屏 + 逐帧存 PPM
 
 | 开关 | 说明 |
 |---|---|
-| `--stream` | 连接设备 56790 接收投屏（设备端需已开启投屏） |
+| `--stream` | 连接设备接收投屏（默认端口 56790，设备端需已开启投屏） |
+| `--port <n>` | 投屏端口，默认 56790 |
 | `--obs [端口]` | 把 H.264 流转成 MPEG-TS/UDP，OBS 媒体源填 `udp://127.0.0.1:9998` |
 | `--dump <目录>` | 解码帧按 PPM 序列落盘（`frame_000000.ppm`…），便于取图/二次处理 |
 | `--help` | 帮助 |
@@ -91,24 +92,28 @@ fenghua_sender 192.168.1.23 --stream --dump out  键鼠 + 投屏 + 逐帧存 PPM
 
 ## 投屏部分实现要点
 
-设备端在 56790 上推流，格式（与 `fenghua_elf/src/screen_stream.cpp` 一致）：
+设备端在 56790 上推流（设备侧的采集由内置的 `scrcpy-server.jar` + MediaProjection 完成，
+见接收端仓库的投屏实现；jar 在设备端运行，PC 端不需要它）。
+
+线上格式：
 
 ```
-[16B 流头] "FHSC" + w(u32BE) + h(u32BE) + u32 flags
-flags & 0x01 != 0  ->  [4B 大端帧长][完整 H.264 访问单元]  循环
-flags & 0x01 == 0  ->  裸 Annex-B 字节流
+[16B 流头]  "FHSC" + w(u32BE) + h(u32BE) + u32 flags
+之后每个访问单元:  [ptsAndFlags 8B][packetSize u32BE][payload]
 ```
 
-本程序：TCP 连接 → 解析流头初始化解码器 → 逐帧 `avcodec_send_packet` →
+`payload` 是 MediaCodec 输出的一帧，通常是 Annex-B（也可能是 AVCC，程序会自动转换）。
+
+本程序：TCP 连接 → 解析流头初始化解码器 → 逐包 `avcodec_send_packet` →
 `avcodec_receive_frame` → 转 RGB32 → 统计 / 存 PPM / 转 MPEG-TS。
 
 ### 解码实现要点
 
-1. **不用 `av_parser_parse2`。**
+1. **不用 `av_parser_parse2`，按 `[pts8][size4]` 头逐包解析。**
+   设备端每个 TCP 包就是一个完整访问单元，直接 `avcodec_send_packet` 即可。
    常见的精简 FFmpeg 构建（例如 scrcpy 用的那份，configure 里是
-   `--disable-everything ... --enable-parser=png`）没有编译 h264 parser，
-   `av_parser_init(AV_CODEC_ID_H264)` 返回 NULL。framed 流里每个包本身就是完整访问单元，
-   直接 `avcodec_send_packet` 即可，不需要 parser。
+   `--disable-everything ... --enable-parser=png`）也没编译 h264 parser，
+   `av_parser_init(AV_CODEC_ID_H264)` 返回 NULL，走 parser 的路会一帧都解不出来。
 
 2. **帧输出走 OBS 或 PPM。**
    本仓库是控制台程序，没有 D3D/窗口渲染。看画面用 `--obs` 或 `--dump`，都不需要额外依赖。

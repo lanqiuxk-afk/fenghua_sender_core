@@ -22,6 +22,7 @@ extern "C" {
 
 #pragma comment(lib, "ws2_32.lib")
 
+static unsigned short g_port = 56790;   // 可用 --port 覆盖
 static const int PORT = 56790;
 
 static const char* kMagic = "FHSC";
@@ -70,7 +71,6 @@ long long g_droppedFrames = 0; // 因积压丢掉的帧数
 // ---------------- FFmpeg 解码 ----------------
 
 static void FeedAccessUnit(const std::vector<uint8_t>& au);
-static bool ResetRawH264Parser();
 
 static bool InitDecoder(int w, int h) {
     if (g_ffctx) {
@@ -118,9 +118,6 @@ static bool InitDecoder(int w, int h) {
 }
 
 static void FeedAccessUnit(const std::vector<uint8_t>& au);
-static bool ResetRawH264Parser();
-static void ParseRawH264(std::vector<uint8_t>& acc);
-static void FlushRawH264Parser();
 static void ParseFramedH264Packet(const std::vector<uint8_t>& au);
 
 static bool HasAnnexBStartCode(const uint8_t* data, size_t len) {
@@ -657,6 +654,37 @@ static void FeedAccessUnit(const std::vector<uint8_t>& au) {
     PullFrames();
 }
 
+// 设备端 flags=0 时的数据形式
+//
+// 这里**不要**去猜 NAL 边界。设备端 (fenghua_elf/src/scrcpy_run.cpp) 的转发循环是:
+//     读 12 字节 [ptsAndFlags 8B][packetSize u32BE]  ->  读 packetSize 字节  ->  ScreenStreamPush
+// 也就是说 TCP 流里就是一个个 scrcpy 包首尾相连, 每个包正好是一个完整访问单元
+// (MediaCodec 的一帧输出)。按这个 12 字节头解析即可, 不需要 H.264 parser
+// (scrcpy 的精简 FFmpeg 里也没编译 parser)。
+static void FeedRawScrcpy(std::vector<uint8_t>& acc) {
+    constexpr uint32_t kMaxAu = 8u << 20;   // 单包上限, 与设备端校验一致
+    while (acc.size() >= 12) {
+        uint32_t size = ((uint32_t)acc[8] << 24) | ((uint32_t)acc[9] << 16) |
+                        ((uint32_t)acc[10] << 8) | acc[11];
+        if (size == 0 || size > kMaxAu) {
+            // 头对不上: 说明前面的字节流已经错位, 丢掉这一字节重新同步
+            static int warned = 0;
+            if (warned++ < 3) {
+                snprintf(g_err, sizeof(g_err), "裸流包长度异常 %u, 重新同步", size);
+            }
+            acc.erase(acc.begin());
+            continue;
+        }
+        if (acc.size() < (size_t)size + 12) break;   // 这包还没收全, 等下一次 recv
+        std::vector<uint8_t> au(acc.begin() + 12, acc.begin() + 12 + size);
+        std::vector<uint8_t> converted;
+        const std::vector<uint8_t>* packet = NormalizeH264(au, converted);
+        if (packet && !packet->empty()) FeedAccessUnit(*packet);
+        acc.erase(acc.begin(), acc.begin() + 12 + size);
+    }
+    if (acc.size() > (16u << 20)) acc.clear();
+}
+
 // 一个访问单元直接送解码器。
 //
 // 为什么不用 av_parser_parse2:
@@ -671,43 +699,8 @@ static void ParseFramedH264Packet(const std::vector<uint8_t>& au) {
     FeedAccessUnit(*packet);
 }
 
-static bool ResetRawH264Parser() {
-    if (g_parser) av_parser_close(g_parser);
-    g_parser = av_parser_init(AV_CODEC_ID_H264);
-    return g_parser != nullptr;
-}
 
-static void ParseRawH264(std::vector<uint8_t>& acc) {
-    if (!g_parser || !g_ffctx) return;
-    while (!acc.empty()) {
-        uint8_t* out = nullptr;
-        int outSize = 0;
-        int inputSize = (int)std::min<size_t>(acc.size(), 1 << 20);
-        int consumed = av_parser_parse2(g_parser, g_ffctx, &out, &outSize,
-                                        acc.data(), inputSize, AV_NOPTS_VALUE,
-                                        AV_NOPTS_VALUE, 0);
-        if (consumed < 0) {
-            g_decodeErrors.fetch_add(1);
-            acc.clear();
-            avcodec_flush_buffers(g_ffctx);
-            return;
-        }
-        if (outSize > 0 && out)
-            FeedAccessUnit(std::vector<uint8_t>(out, out + outSize));
-        if (consumed == 0) break;
-        acc.erase(acc.begin(), acc.begin() + consumed);
-    }
-}
 
-static void FlushRawH264Parser() {
-    if (!g_parser || !g_ffctx) return;
-    uint8_t* out = nullptr;
-    int outSize = 0;
-    av_parser_parse2(g_parser, g_ffctx, &out, &outSize, nullptr, 0,
-                     AV_NOPTS_VALUE, AV_NOPTS_VALUE, 0);
-    if (outSize > 0 && out)
-        FeedAccessUnit(std::vector<uint8_t>(out, out + outSize));
-}
 
 // ---------------- H.264 NAL 解析 ----------------
 
@@ -812,7 +805,7 @@ static void ReaderThread() {
         g_sock.store(sock);
         sockaddr_in a = {};
         a.sin_family = AF_INET;
-        a.sin_port = htons(PORT);
+        a.sin_port = htons(g_port);
         inet_pton(AF_INET, g_ip, &a.sin_addr);
         if (sock == INVALID_SOCKET || !ConnectWithTimeout(sock, a, 5)) {
             snprintf(g_err, sizeof(g_err), "连接失败: %s:56790(2秒后自动重试)", g_ip);
@@ -898,17 +891,9 @@ static void ReaderThread() {
                     ParseFramedH264Packet(au);
                     acc.erase(acc.begin(), acc.begin() + 4 + frameSize);
                 }
-            } else if (acc.size() >= 4) {
-                int lastSc = -1;
-                for (int k = 0; k + 4 <= (int)acc.size(); ++k) {
-                    if (acc[k] == 0 && acc[k + 1] == 0 &&
-                        (acc[k + 2] == 1 || (acc[k + 2] == 0 && acc[k + 3] == 1)))
-                        lastSc = k;
-                }
-                if (lastSc > 0) {
-                    ParseH264(acc.data(), (size_t)lastSc);
-                    acc.erase(acc.begin(), acc.begin() + lastSc);
-                }
+            } else {
+                // 设备端 flags=0: 连续的 scrcpy 包, 每包一个访问单元
+                FeedRawScrcpy(acc);
             }
 
             // 积压过大(解码跟不上)时跳到最近的 SPS+IDR, 限制延迟。
@@ -951,7 +936,8 @@ static void ReaderThread() {
         if (!g_framedStream) {
             if (!acc.empty()) ParseH264(acc.data(), acc.size());
         } else {
-            FlushRawH264Parser();
+            // 裸流: 残留数据已无法凑成完整包, 直接丢弃
+            acc.clear();
         }
         if (g_parser) { av_parser_close(g_parser); g_parser = nullptr; }
         g_connected = false;
@@ -968,6 +954,10 @@ static void ReaderThread() {
 }
 
 // ---------------- 对外接口 ----------------
+
+void VideoPlayerSetPort(unsigned short port) {
+    if (port) g_port = port;
+}
 
 bool VideoPlayerStart(const char* ip) {
     if (g_run) return true;
