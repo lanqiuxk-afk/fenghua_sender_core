@@ -146,4 +146,7 @@ fenghua_sender_core/
 
 ## License
 
-MIT
+MIT，见 LICENSE。
+
+随包分发的 FFmpeg 运行时是 LGPL v2.1+，见
+[	hird_party/NOTICE.md](third_party/NOTICE.md)。
